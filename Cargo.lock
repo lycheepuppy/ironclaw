@@ -9137,7 +9137,7 @@ dependencies = [
 [[package]]
 name = "walletconnect-client"
 version = "0.2.0"
-source = "git+https://github.com/zmanian/walletconnect-client.git?branch=main#6529e144405df0bc97f8fe0c34083c45d36a6fca"
+source = "git+https://github.com/zmanian/walletconnect-client.git?rev=6529e144405df0bc97f8fe0c34083c45d36a6fca#6529e144405df0bc97f8fe0c34083c45d36a6fca"
 dependencies = [
  "async-trait",
  "bs58",
