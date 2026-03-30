@@ -435,15 +435,10 @@ impl AppBuilder {
         ));
 
         let wc_session = if self.config.ethereum.enabled {
-            let session = Arc::new(
-                crate::tools::builtin::ethereum::WalletConnectSession::new(
-                    self.config.ethereum.walletconnect_project_id.clone(),
-                ),
-            );
-            tools.register_ethereum_tools(
-                Arc::clone(&session),
-                Arc::clone(&callback_registry),
-            );
+            let session = Arc::new(crate::tools::builtin::ethereum::WalletConnectSession::new(
+                self.config.ethereum.walletconnect_project_id.clone(),
+            ));
+            tools.register_ethereum_tools(Arc::clone(&session), Arc::clone(&callback_registry));
             tracing::info!("Ethereum wallet tools registered");
             Some(session)
         } else {
@@ -463,7 +458,15 @@ impl AppBuilder {
             None
         };
 
-        Ok((safety, tools, embeddings, workspace, builder, callback_registry, wc_session))
+        Ok((
+            safety,
+            tools,
+            embeddings,
+            workspace,
+            builder,
+            callback_registry,
+            wc_session,
+        ))
     }
 
     /// Phase 5: Load WASM tools, MCP servers, and create extension manager.
