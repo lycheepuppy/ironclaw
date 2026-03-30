@@ -49,4 +49,7 @@ wildcards = "deny"
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+allow-git = [
+    # walletconnect-client fork with native tokio transport (PR #1759)
+    "https://github.com/zmanian/walletconnect-client.git",
+]
