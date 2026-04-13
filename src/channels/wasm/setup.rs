@@ -372,8 +372,11 @@ fn owner_actor_id_for_channel(
                 .capabilities_file
                 .as_ref()
                 .and_then(|file| file.config.get("owner_id"))
-                .and_then(serde_json::Value::as_i64)
-                .map(|owner_id| owner_id.to_string())
+                .and_then(|v| {
+                    v.as_i64()
+                        .map(|id| id.to_string())
+                        .or_else(|| v.as_str().map(|s| s.to_string()))
+                })
         })
 }
 
@@ -693,13 +696,13 @@ mod tests {
     }
 
     #[test]
-    fn owner_actor_id_ignores_non_integer_capabilities_config() {
+    fn owner_actor_id_accepts_string_capabilities_config() {
         let (config, _temp_dir) = test_config();
         let loaded = test_loaded_channel("telegram", serde_json::json!({ "owner_id": "12345" }));
 
         assert_eq!(
             super::owner_actor_id_for_channel(&loaded, &config, "telegram"),
-            None
+            Some("12345".to_string())
         );
     }
 
