@@ -32,6 +32,15 @@ pub fn check(
         if bundle.legs.len() == 1 && leg.min_out.value_usd.is_empty() {
             return Err("leg min_out.value_usd is empty".to_string());
         }
+        if bundle.legs.len() == 1
+            && !leg.min_out.value_usd.is_empty()
+            && leg.min_out.value_usd.parse::<f64>().is_err()
+        {
+            return Err(format!(
+                "leg min_out.value_usd '{}' is not a valid number",
+                leg.min_out.value_usd
+            ));
+        }
         let leg_min = parse_decimal(&leg.min_out.value_usd);
         if bundle.legs.len() == 1 && leg_min + 1e-9 < min_required {
             return Err(format!(
