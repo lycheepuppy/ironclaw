@@ -1375,10 +1375,15 @@ impl Agent {
                                     serde_json::json!(result_content),
                                 );
                             }
+                        } else {
+                            tracing::warn!(
+                                %thread_id,
+                                "Thread has no turns; tool result could not be recorded"
+                            );
                         }
                     }
                     None => {
-                        tracing::debug!(
+                        tracing::warn!(
                             %thread_id,
                             "Thread disappeared before tool result could be recorded"
                         );
@@ -1631,10 +1636,16 @@ impl Agent {
                                         serde_json::json!(deferred_content),
                                     );
                                 }
+                            } else {
+                                tracing::warn!(
+                                    %thread_id,
+                                    tool = %tc.name,
+                                    "Thread has no turns; deferred tool result could not be recorded"
+                                );
                             }
                         }
                         None => {
-                            tracing::debug!(
+                            tracing::warn!(
                                 %thread_id,
                                 tool = %tc.name,
                                 "Thread disappeared before deferred tool result could be recorded"
