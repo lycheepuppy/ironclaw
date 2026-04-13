@@ -63,12 +63,22 @@ Include measurable targets when possible. If the project would benefit from trac
 | {name} | {unit} | {target} | {evaluation instruction — tell the agent HOW to check this: API call, file to read, command to run} |
 ```
 
-### 4. Create missions
+### 4. Create project record
 
-Create recurring missions scoped to the project. Use the **slug** as `project_id`:
+Create the project so it gets a UUID:
 
 ```
-mission_create(name: "...", goal: "...", cadence: "daily", project_id: "{slug}")
+project_create(name: "{Project Name}", slug: "{slug}")
+```
+
+Save the returned `project_id` (a UUID) for subsequent `mission_create` calls.
+
+### 5. Create missions
+
+Create recurring missions scoped to the project. Use the **UUID** returned by `project_create` as `project_id` (not the slug):
+
+```
+mission_create(name: "...", goal: "...", cadence: "daily", project_id: "{project_id UUID}")
 ```
 
 Choose appropriate cadences: `hourly`, `daily`, `weekly`, `monthly`, or cron expressions like `0 9 * * 1-5`.

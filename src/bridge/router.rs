@@ -3846,13 +3846,20 @@ pub async fn get_engine_projects_overview(
     let mut attention = Vec::new();
     let mut entries = Vec::new();
 
+    // TODO: N+1 query pattern — batch thread/mission listing or use concurrent futures
     for project in &projects {
         let pid = project.id;
-        let threads = store.list_threads(pid, user_id).await.unwrap_or_default();
+        let threads = store.list_threads(pid, user_id).await.unwrap_or_else(|e| {
+            tracing::debug!(project_id = %pid, "Failed to list threads for project overview: {e}");
+            vec![]
+        });
         let missions = store
             .list_missions_with_shared(pid, user_id)
             .await
-            .unwrap_or_default();
+            .unwrap_or_else(|e| {
+                tracing::debug!(project_id = %pid, "Failed to list missions for project overview: {e}");
+                vec![]
+            });
 
         let active_missions = missions
             .iter()

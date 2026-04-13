@@ -493,6 +493,8 @@ pub async fn project_widgets_handler(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
+    // TODO: deriving slug from project.name is fragile — renaming breaks widget
+    // discovery. Consider persisting a stable slug in the project record.
     let slug = project
         .name
         .to_lowercase()
@@ -537,7 +539,8 @@ pub async fn project_widgets_handler(
             .await
             .ok()
             .map(|d| d.content)
-            .filter(|c| !c.trim().is_empty() && c.len() <= MAX_WIDGET_CSS_BYTES);
+            .filter(|c| !c.trim().is_empty() && c.len() <= MAX_WIDGET_CSS_BYTES)
+            .map(|c| ironclaw_gateway::scope_css(&c, name));
 
         let enabled = layout
             .widgets

@@ -190,8 +190,8 @@ impl LlmBackend for LlmBridgeAdapter {
 // history and extracting the requested JSON field from the result.
 
 /// Regex-free lightweight scan for `{{<call_id>.<field>}}` patterns.
-/// Returns the resolved string if all references could be substituted,
-/// or the original string if none were found.
+/// Returns a string with as many references substituted as possible.
+/// Unresolvable references are left as-is in the output.
 fn resolve_template_refs(value: &str, tool_results: &[(String, serde_json::Value)]) -> String {
     if !value.contains("{{") {
         return value.to_string();

@@ -250,7 +250,7 @@ impl EffectBridgeAdapter {
                     Ok(u) => ironclaw_engine::ProjectId(u),
                     Err(e) => {
                         return Some(Err(EngineError::Effect {
-                            reason: format!("Invalid project_id: {e}"),
+                            reason: format!("Invalid id: {e}"),
                         }));
                     }
                 };
@@ -422,12 +422,19 @@ impl EffectBridgeAdapter {
                     };
                 // Allow explicit project_id override (so agent can create
                 // missions in a specific project from any thread).
-                let target_project = params
-                    .get("project_id")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| uuid::Uuid::parse_str(s).ok())
-                    .map(ironclaw_engine::ProjectId)
-                    .unwrap_or(context.project_id);
+                let target_project = match params.get("project_id").and_then(|v| v.as_str()) {
+                    Some(s) => match uuid::Uuid::parse_str(s) {
+                        Ok(u) => ironclaw_engine::ProjectId(u),
+                        Err(e) => {
+                            tracing::debug!(
+                                project_id = %s,
+                                "project_id is not a valid UUID, falling back to current project: {e}"
+                            );
+                            context.project_id
+                        }
+                    },
+                    None => context.project_id,
+                };
                 match mgr
                     .create_mission(
                         target_project,

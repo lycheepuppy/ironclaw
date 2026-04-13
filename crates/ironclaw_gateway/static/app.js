@@ -3491,6 +3491,7 @@ function switchTab(tab) {
   } else if (crCurrentProjectId) {
     // Reset drill-in state when leaving Projects tab so we start fresh.
     crCurrentProjectId = null;
+    destroyProjectWidgets();
   }
   if (tab === 'routines') loadRoutines();
   if (tab === 'logs') { connectLogSSE(); applyLogFilters(); }
@@ -6203,11 +6204,13 @@ function loadProjectWidgets(projectId) {
           document.head.appendChild(style);
         }
 
-        // Eval the JS module to register the widget.
+        // Mount widget JS via inline <script> to avoid CSP 'unsafe-eval' issues.
         try {
           var api = typeof IronClaw !== 'undefined' ? IronClaw.api : null;
-          var fn = new Function('container', 'api', 'projectId', w.js);
-          fn(container, api, projectId);
+          var script = document.createElement('script');
+          script.type = 'module';
+          script.textContent = '(function(container, api, projectId) {' + w.js + '})(document.querySelector("[data-widget=\\"' + manifest.id + '\\"]"), ' + (api ? 'IronClaw.api' : 'null') + ', "' + projectId + '");';
+          document.body.appendChild(script);
 
           _projectWidgets.push({
             id: manifest.id,
