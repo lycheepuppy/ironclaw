@@ -160,7 +160,7 @@ impl ConversationStore for LibSqlBackend {
                 .get("thread_type")
                 .and_then(|v| v.as_str())
                 .map(String::from);
-            let sql_title = get_opt_text(&row, 6);
+            let sql_title = get_opt_text(&row, 6).filter(|s| !s.is_empty());
             let title = sql_title
                 .or_else(|| {
                     metadata
@@ -235,7 +235,7 @@ impl ConversationStore for LibSqlBackend {
                 .get("thread_type")
                 .and_then(|v| v.as_str())
                 .map(String::from);
-            let sql_title = get_opt_text(&row, 6);
+            let sql_title = get_opt_text(&row, 6).filter(|s| !s.is_empty());
             let title = sql_title
                 .or_else(|| {
                     metadata

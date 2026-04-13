@@ -1824,7 +1824,7 @@ impl Store {
                     .get("thread_type")
                     .and_then(|v| v.as_str())
                     .map(String::from);
-                let sql_title: Option<String> = r.get("title");
+                let sql_title: Option<String> = r.get::<Option<String>, _>("title").filter(|s| !s.is_empty());
                 let title = sql_title
                     .or_else(|| {
                         metadata
@@ -1894,7 +1894,7 @@ impl Store {
                     .map(String::from);
                 // For routine/heartbeat threads, derive title from metadata
                 // since they may have no user messages.
-                let sql_title: Option<String> = r.get("title");
+                let sql_title: Option<String> = r.get::<Option<String>, _>("title").filter(|s| !s.is_empty());
                 let title = sql_title
                     .or_else(|| {
                         metadata

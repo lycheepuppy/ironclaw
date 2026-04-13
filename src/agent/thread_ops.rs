@@ -876,9 +876,15 @@ impl Agent {
         if let Ok(None) = store
             .get_conversation_metadata(thread_id)
             .await
-            .map(|m| m.and_then(|v| v.get("title").and_then(|t| t.as_str()).map(String::from)))
+            .map(|m| m.and_then(|v| v.get("title").and_then(|t| t.as_str()).filter(|s| !s.is_empty()).map(String::from)))
         {
-            let title_text: String = user_input.chars().take(100).collect();
+            let title_text: String = user_input
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(100)
+                .collect();
             let title_val = serde_json::json!(title_text);
             let _ = store
                 .update_conversation_metadata_field(thread_id, "title", &title_val)
