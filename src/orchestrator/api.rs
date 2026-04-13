@@ -438,7 +438,8 @@ async fn get_prompt_handler(
 
 /// Serve decrypted credentials for a job's granted secrets.
 ///
-/// Returns 204 if no grants exist, 503 if no secrets store is configured,
+/// Returns 204 if no grants exist, 503 if no secrets store is configured
+/// or the job owner cannot be resolved yet (transient — worker should retry),
 /// or a JSON array of `{ env_var, value }` pairs.
 ///
 /// Credential lookup uses the job creator's user_id (resolved from
@@ -490,11 +491,16 @@ async fn get_credentials_handler(
                         .insert(job_id, uid.clone());
                 }
                 uid.ok_or_else(|| {
-                    tracing::error!(
+                    // Return 503 (not 403) so the worker retries. The job
+                    // may have just been created and the async DB persist
+                    // hasn't completed yet — a transient timing gap, not a
+                    // real auth failure. (#2381)
+                    tracing::warn!(
                         job_id = %job_id,
-                        "Cannot resolve job owner for credential lookup; refusing to serve credentials"
+                        "Cannot resolve job owner for credential lookup yet; \
+                         returning 503 so the worker retries"
                     );
-                    StatusCode::FORBIDDEN
+                    StatusCode::SERVICE_UNAVAILABLE
                 })?
             }
         }
@@ -856,7 +862,7 @@ mod tests {
     /// user_id, not a global owner. When no owner can be resolved, the handler
     /// must refuse (403) rather than falling back to any default.
     #[tokio::test]
-    async fn credentials_returns_403_when_job_owner_unknown() {
+    async fn credentials_returns_503_when_job_owner_unknown() {
         use crate::testing::credentials::test_secrets_store;
         use secrecy::SecretString;
         let secrets_store = Arc::new(test_secrets_store());
@@ -909,8 +915,10 @@ mod tests {
             .unwrap();
 
         let resp = router.oneshot(req).await.unwrap();
-        // No owner resolved and no DB → 403 Forbidden (fail closed)
-        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        // No owner resolved and no DB → 503 Service Unavailable (retryable)
+        // Changed from 403 to 503 so the worker retries: the async DB
+        // persist may not have completed yet. (#2381)
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     /// Regression test for #2068: sandbox job credentials must be scoped to
