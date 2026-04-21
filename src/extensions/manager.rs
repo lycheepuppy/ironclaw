@@ -3466,14 +3466,13 @@ impl ExtensionManager {
                         "Only HTTPS URLs are allowed for capabilities downloads".to_string(),
                     ));
                 }
-                let caps_target =
-                    crate::tools::wasm::validate_and_resolve_http_target(caps_url)
-                        .await
-                        .map_err(|e| {
-                            ExtensionError::DownloadFailed(format!(
-                                "SSRF blocked for capabilities URL: {e}"
-                            ))
-                        })?;
+                let caps_target = crate::tools::wasm::validate_and_resolve_http_target(caps_url)
+                    .await
+                    .map_err(|e| {
+                        ExtensionError::DownloadFailed(format!(
+                            "SSRF blocked for capabilities URL: {e}"
+                        ))
+                    })?;
                 let caps_client =
                     crate::tools::wasm::ssrf_safe_client_builder_for_target(&caps_target)
                         .timeout(std::time::Duration::from_secs(30))

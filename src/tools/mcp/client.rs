@@ -117,7 +117,7 @@ impl McpClient {
                  falling back to canonical 'unknown'"
             );
             McpServerName::new("unknown")
-                .expect("'unknown' is a valid McpServerName (alnum allowlist)")
+                .expect("'unknown' is a valid McpServerName (alnum allowlist)") // safety: hardcoded literal satisfies alnum-only validation; infallible
         });
         let transport = Arc::new(HttpMcpTransport::new(url.clone(), name.as_str())?);
 
@@ -154,7 +154,7 @@ impl McpClient {
                  falling back to canonical 'unknown'"
             );
             McpServerName::new("unknown")
-                .expect("'unknown' is a valid McpServerName (alnum allowlist)")
+                .expect("'unknown' is a valid McpServerName (alnum allowlist)") // safety: hardcoded literal satisfies alnum-only validation; infallible
         });
         let url: String = server_url.into();
         let transport = Arc::new(HttpMcpTransport::new(url.clone(), name.as_str())?);
@@ -192,7 +192,7 @@ impl McpClient {
                  falling back to canonical 'unknown'"
             );
             McpServerName::new("unknown")
-                .expect("'unknown' is a valid McpServerName (alnum allowlist)")
+                .expect("'unknown' is a valid McpServerName (alnum allowlist)") // safety: hardcoded literal satisfies alnum-only validation; infallible
         });
         let transport = Arc::new(HttpMcpTransport::new_unchecked(url.clone(), name.as_str()));
         Self {
@@ -226,7 +226,7 @@ impl McpClient {
                  falling back to canonical 'unknown'"
             );
             McpServerName::new("unknown")
-                .expect("'unknown' is a valid McpServerName (alnum allowlist)")
+                .expect("'unknown' is a valid McpServerName (alnum allowlist)") // safety: hardcoded literal satisfies alnum-only validation; infallible
         });
         let url: String = server_url.into();
         let transport = Arc::new(HttpMcpTransport::new_unchecked(url.clone(), name.as_str()));
@@ -326,7 +326,7 @@ impl McpClient {
                  falling back to canonical 'unknown'"
             );
             McpServerName::new("unknown")
-                .expect("'unknown' is a valid McpServerName (alnum allowlist)")
+                .expect("'unknown' is a valid McpServerName (alnum allowlist)") // safety: hardcoded literal satisfies alnum-only validation; infallible
         });
         let user_id_str: String = user_id.into();
         let transport = Arc::new(
@@ -382,7 +382,7 @@ impl McpClient {
                  falling back to canonical 'unknown'"
             );
             McpServerName::new("unknown")
-                .expect("'unknown' is a valid McpServerName (alnum allowlist)") // safety: hardcoded literal satisfies alnum-only validation; infallible
+                .expect("'unknown' is a valid McpServerName (alnum allowlist)") // safety: hardcoded literal satisfies alnum-only validation; infallible // safety: hardcoded literal satisfies alnum-only validation; infallible
         });
         let url = server_config
             .as_ref()
@@ -1679,8 +1679,9 @@ mod tests {
             Arc::new(crate::secrets::InMemorySecretsStore::new(crypto));
 
         let config = McpServerConfig::new("bad name", "https://93.184.215.14");
-        let client = McpClient::new_authenticated(config, session_manager, secrets, "test-user")
-            .expect("factory should succeed for public IP");
+        let client =
+            McpClient::new_authenticated(config, session_manager, secrets, "test-user")
+                .expect("factory should succeed for public IP");
         assert_eq!(
             client.server_name(),
             "unknown",
@@ -1698,8 +1699,9 @@ mod tests {
             Arc::new(crate::secrets::InMemorySecretsStore::new(crypto));
 
         let config = McpServerConfig::new("good_name123", "https://93.184.215.14");
-        let client = McpClient::new_authenticated(config, session_manager, secrets, "test-user")
-            .expect("factory should succeed for public IP");
+        let client =
+            McpClient::new_authenticated(config, session_manager, secrets, "test-user")
+                .expect("factory should succeed for public IP");
         assert_eq!(client.server_name(), "good_name123");
     }
 
@@ -2151,8 +2153,9 @@ mod tests {
         let secrets: Arc<dyn crate::secrets::SecretsStore + Send + Sync> =
             Arc::new(EmptyTokenStore);
 
-        let client = McpClient::new_authenticated(config, session_manager, secrets, "test-user")
-            .expect("factory should succeed for public IP");
+        let client =
+            McpClient::new_authenticated(config, session_manager, secrets, "test-user")
+                .expect("factory should succeed for public IP");
 
         let headers = client.build_request_headers().await.unwrap(); // safety: test
         assert!(
@@ -2217,8 +2220,9 @@ mod tests {
         let secrets: Arc<dyn crate::secrets::SecretsStore + Send + Sync> =
             Arc::new(PaddedTokenStore);
 
-        let client = McpClient::new_authenticated(config, session_manager, secrets, "test-user")
-            .expect("factory should succeed for public IP");
+        let client =
+            McpClient::new_authenticated(config, session_manager, secrets, "test-user")
+                .expect("factory should succeed for public IP");
 
         let headers = client.build_request_headers().await.unwrap(); // safety: test
         assert_eq!(

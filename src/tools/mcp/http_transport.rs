@@ -57,7 +57,7 @@ impl HttpMcpTransport {
                  falling back to canonical 'unknown'"
             );
             McpServerName::new("unknown")
-                .expect("'unknown' is a valid McpServerName (alnum allowlist)")
+                .expect("'unknown' is a valid McpServerName (alnum allowlist)") // safety: hardcoded literal satisfies alnum-only validation; infallible
         });
 
         if !crate::tools::mcp::config::is_localhost_url(&server_url) {
@@ -505,8 +505,9 @@ mod tests {
     fn test_with_custom_headers() {
         let mut headers = HashMap::new();
         headers.insert("X-Custom".to_string(), "value".to_string());
-        let transport =
-            HttpMcpTransport::new("http://localhost:8080", "test").unwrap().with_custom_headers(headers);
+        let transport = HttpMcpTransport::new("http://localhost:8080", "test")
+            .unwrap()
+            .with_custom_headers(headers);
         assert_eq!(transport.custom_headers.get("X-Custom").unwrap(), "value");
     }
 
@@ -556,7 +557,9 @@ mod tests {
             ("X-Api-Key".to_string(), "secret-key".to_string()),
             ("X-Org-Id".to_string(), "org-123".to_string()),
         ]);
-        let transport = HttpMcpTransport::new(&url, "echo_test").unwrap().with_custom_headers(custom);
+        let transport = HttpMcpTransport::new(&url, "echo_test")
+            .unwrap()
+            .with_custom_headers(custom);
 
         let request = McpRequest {
             jsonrpc: "2.0".to_string(),
@@ -583,7 +586,9 @@ mod tests {
             "authorization".to_string(),
             "Bearer custom-token".to_string(),
         )]);
-        let transport = HttpMcpTransport::new(&url, "echo_test").unwrap().with_custom_headers(custom);
+        let transport = HttpMcpTransport::new(&url, "echo_test")
+            .unwrap()
+            .with_custom_headers(custom);
 
         // Per-request header should override the custom header
         let per_request = HashMap::from([(
@@ -640,7 +645,9 @@ mod tests {
             "authorization".to_string(),
             "Bearer custom-token".to_string(),
         )]);
-        let transport = HttpMcpTransport::new(&url, "echo_test").unwrap().with_custom_headers(custom);
+        let transport = HttpMcpTransport::new(&url, "echo_test")
+            .unwrap()
+            .with_custom_headers(custom);
 
         let per_request = HashMap::new(); // no per-request auth
         let request = McpRequest {
