@@ -167,7 +167,7 @@ pub(crate) fn is_private_ip(ip: IpAddr) -> bool {
                 || v6.is_unspecified()
                 || (v6.segments()[0] & 0xFE00) == 0xFC00  // ULA
                 || (v6.segments()[0] & 0xFFC0) == 0xFE80  // link-local
-                || v6.segments()[0] == 0x2002              // 6to4 (embeds arbitrary IPv4)
+                || v6.segments()[0] == 0x2002 // 6to4 (embeds arbitrary IPv4)
         }
     }
 }
@@ -304,11 +304,7 @@ mod tests {
 
     #[test]
     fn is_private_ip_blocks_ipv4_mapped_ipv6_private() {
-        for addr in &[
-            "::ffff:10.0.0.1",
-            "::ffff:192.168.1.1",
-            "::ffff:172.16.0.1",
-        ] {
+        for addr in &["::ffff:10.0.0.1", "::ffff:192.168.1.1", "::ffff:172.16.0.1"] {
             let ip: std::net::IpAddr = addr.parse().unwrap();
             assert!(super::is_private_ip(ip), "{addr} must be blocked");
         }
