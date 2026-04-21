@@ -157,20 +157,27 @@ pub(crate) fn reject_private_ip(url: &str) -> Result<(), String> {
 
 pub(crate) fn is_private_ip(ip: IpAddr) -> bool {
     match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64
-        }
+        IpAddr::V4(v4) => is_private_ipv4(v4),
         IpAddr::V6(v6) => {
+            // IPv4-mapped IPv6 (::ffff:x.x.x.x) — check the embedded v4 address.
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_private_ipv4(v4);
+            }
             v6.is_loopback()
                 || v6.is_unspecified()
-                || (v6.segments()[0] & 0xFE00) == 0xFC00
-                || (v6.segments()[0] & 0xFFC0) == 0xFE80
+                || (v6.segments()[0] & 0xFE00) == 0xFC00  // ULA
+                || (v6.segments()[0] & 0xFFC0) == 0xFE80  // link-local
+                || v6.segments()[0] == 0x2002              // 6to4 (embeds arbitrary IPv4)
         }
     }
+}
+
+fn is_private_ipv4(v4: std::net::Ipv4Addr) -> bool {
+    v4.is_loopback()
+        || v4.is_private()
+        || v4.is_link_local()
+        || v4.is_unspecified()
+        || v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64 // shared address space
 }
 
 #[cfg(test)]
@@ -278,5 +285,47 @@ mod tests {
         assert_eq!(response.text().await.unwrap(), "ok");
 
         server.abort();
+    }
+
+    #[test]
+    fn is_private_ip_blocks_ipv4_mapped_ipv6_loopback() {
+        let ip: std::net::IpAddr = "::ffff:127.0.0.1".parse().unwrap();
+        assert!(super::is_private_ip(ip), "::ffff:127.0.0.1 must be blocked");
+    }
+
+    #[test]
+    fn is_private_ip_blocks_ipv4_mapped_ipv6_metadata() {
+        let ip: std::net::IpAddr = "::ffff:169.254.169.254".parse().unwrap();
+        assert!(
+            super::is_private_ip(ip),
+            "::ffff:169.254.169.254 must be blocked"
+        );
+    }
+
+    #[test]
+    fn is_private_ip_blocks_ipv4_mapped_ipv6_private() {
+        for addr in &[
+            "::ffff:10.0.0.1",
+            "::ffff:192.168.1.1",
+            "::ffff:172.16.0.1",
+        ] {
+            let ip: std::net::IpAddr = addr.parse().unwrap();
+            assert!(super::is_private_ip(ip), "{addr} must be blocked");
+        }
+    }
+
+    #[test]
+    fn is_private_ip_allows_ipv4_mapped_ipv6_public() {
+        let ip: std::net::IpAddr = "::ffff:8.8.8.8".parse().unwrap();
+        assert!(
+            !super::is_private_ip(ip),
+            "::ffff:8.8.8.8 should be allowed"
+        );
+    }
+
+    #[test]
+    fn is_private_ip_blocks_6to4() {
+        let ip: std::net::IpAddr = "2002::1".parse().unwrap();
+        assert!(super::is_private_ip(ip), "6to4 (2002::/16) must be blocked");
     }
 }

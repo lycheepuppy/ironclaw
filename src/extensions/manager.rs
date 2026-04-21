@@ -3362,17 +3362,26 @@ impl ExtensionManager {
         capabilities_url: Option<&str>,
         target_dir: &std::path::Path,
     ) -> Result<(), ExtensionError> {
-        // Require HTTPS to prevent downgrade attacks
-        if !url.starts_with("https://") {
+        // Require HTTPS via URL parsing (not string prefix) to handle edge cases.
+        let parsed_url =
+            url::Url::parse(url).map_err(|e| ExtensionError::InstallFailed(e.to_string()))?;
+        if parsed_url.scheme() != "https" {
             return Err(ExtensionError::InstallFailed(
                 "Only HTTPS URLs are allowed for extension downloads".to_string(),
             ));
         }
 
+        // Resolve hostname, reject private/loopback/metadata IPs, and pin the
+        // validated addresses so reqwest cannot re-resolve to a different IP
+        // (prevents DNS rebinding TOCTOU).
+        let target = crate::tools::wasm::validate_and_resolve_http_target(url)
+            .await
+            .map_err(|e| ExtensionError::DownloadFailed(format!("SSRF blocked: {e}")))?;
+
         // 50 MB cap to prevent disk-fill DoS
         const MAX_DOWNLOAD_SIZE: usize = 50 * 1024 * 1024;
 
-        let client = reqwest::Client::builder()
+        let client = crate::tools::wasm::ssrf_safe_client_builder_for_target(&target)
             .timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|e| ExtensionError::DownloadFailed(e.to_string()))?;
@@ -3448,8 +3457,31 @@ impl ExtensionManager {
 
             // Download capabilities separately if URL provided
             if let Some(caps_url) = capabilities_url {
+                // Validate capabilities URL: require HTTPS and block private IPs.
+                let caps_parsed = url::Url::parse(caps_url).map_err(|e| {
+                    ExtensionError::InstallFailed(format!("Invalid capabilities URL: {e}"))
+                })?;
+                if caps_parsed.scheme() != "https" {
+                    return Err(ExtensionError::InstallFailed(
+                        "Only HTTPS URLs are allowed for capabilities downloads".to_string(),
+                    ));
+                }
+                let caps_target =
+                    crate::tools::wasm::validate_and_resolve_http_target(caps_url)
+                        .await
+                        .map_err(|e| {
+                            ExtensionError::DownloadFailed(format!(
+                                "SSRF blocked for capabilities URL: {e}"
+                            ))
+                        })?;
+                let caps_client =
+                    crate::tools::wasm::ssrf_safe_client_builder_for_target(&caps_target)
+                        .timeout(std::time::Duration::from_secs(30))
+                        .build()
+                        .map_err(|e| ExtensionError::DownloadFailed(e.to_string()))?;
+
                 const MAX_CAPS_SIZE: usize = 1024 * 1024; // 1 MB
-                match client.get(caps_url).send().await {
+                match caps_client.get(caps_url).send().await {
                     Ok(resp) if resp.status().is_success() => match resp.bytes().await {
                         Ok(caps_bytes) if caps_bytes.len() <= MAX_CAPS_SIZE => {
                             if let Err(e) = tokio::fs::write(&caps_path, &caps_bytes).await {
@@ -3476,7 +3508,7 @@ impl ExtensionManager {
                         tracing::warn!(
                             "Failed to download capabilities for '{}' from {}",
                             name,
-                            caps_url
+                            sanitize_url_for_logging(caps_url)
                         );
                     }
                 }

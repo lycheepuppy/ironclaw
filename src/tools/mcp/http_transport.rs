@@ -33,13 +33,21 @@ pub struct HttpMcpTransport {
 impl HttpMcpTransport {
     /// Create a new HTTP transport for the given server URL.
     ///
+    /// Validates that the URL does not target private/loopback IPs (SSRF
+    /// prevention) unless the URL is localhost — MCP servers are commonly
+    /// run locally for development. Uses the centralized SSRF-safe client
+    /// builder which disables redirects.
+    ///
     /// TODO(type-safety PR 4 of 4): accept `McpServerName` directly once
     /// all callers migrate. For now the raw string is validated through
     /// `McpServerName::new`; if validation fails we fall back to the
     /// canonical `"unknown"` value rather than bypassing the allowlist
-    /// via `from_trusted`. This mirrors the hardening applied to
-    /// `McpClient::new` / `McpClient::new_with_name`.
-    pub fn new(server_url: impl Into<String>, server_name: impl Into<String>) -> Self {
+    /// via `from_trusted`.
+    pub fn new(
+        server_url: impl Into<String>,
+        server_name: impl Into<String>,
+    ) -> Result<Self, ToolError> {
+        let server_url = server_url.into();
         let raw: String = server_name.into();
         let server_name = McpServerName::new(&raw).unwrap_or_else(|e| {
             tracing::debug!(
@@ -49,19 +57,59 @@ impl HttpMcpTransport {
                  falling back to canonical 'unknown'"
             );
             McpServerName::new("unknown")
-                .expect("'unknown' is a valid McpServerName (alnum allowlist)") // safety: hardcoded literal satisfies alnum-only validation; infallible
+                .expect("'unknown' is a valid McpServerName (alnum allowlist)")
+        });
+
+        if !crate::tools::mcp::config::is_localhost_url(&server_url) {
+            crate::tools::wasm::reject_private_ip(&server_url).map_err(|e| {
+                ToolError::ExternalService(format!(
+                    "[{}] SSRF blocked for MCP server URL: {}",
+                    server_name, e
+                ))
+            })?;
+        }
+
+        let http_client = crate::tools::wasm::ssrf_safe_client_builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| {
+                ToolError::ExternalService(format!(
+                    "[{}] Failed to create HTTP client: {}",
+                    server_name, e
+                ))
+            })?;
+
+        Ok(Self {
+            server_url,
+            server_name,
+            http_client,
+            session_manager: None,
+            session_user_id: None,
+            custom_headers: HashMap::new(),
+        })
+    }
+
+    /// Test-only constructor that skips IP validation (allows localhost).
+    #[cfg(test)]
+    pub fn new_unchecked(server_url: impl Into<String>, server_name: impl Into<String>) -> Self {
+        let raw: String = server_name.into();
+        let server_name = McpServerName::new(&raw).unwrap_or_else(|e| {
+            tracing::debug!(
+                candidate = %raw,
+                error = %e,
+                "HttpMcpTransport::new_unchecked: caller-provided server name failed allowlist validation; \
+                 falling back to canonical 'unknown'"
+            );
+            McpServerName::new("unknown")
+                .expect("'unknown' is a valid McpServerName (alnum allowlist)")
         });
         Self {
             server_url: server_url.into(),
             server_name,
-            // reqwest::Client::builder().build() only fails if the TLS backend
-            // cannot initialize, which does not happen with the default rustls
-            // feature set. Panic is acceptable here (same as reqwest's own
-            // `Client::new()`).
-            http_client: reqwest::Client::builder()
+            http_client: crate::tools::wasm::ssrf_safe_client_builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
-                .expect("Failed to create HTTP client"), // safety: TLS init with default rustls cannot fail
+                .expect("TLS init with default rustls cannot fail"),
             session_manager: None,
             session_user_id: None,
             custom_headers: HashMap::new(),
@@ -404,7 +452,7 @@ mod tests {
 
     #[test]
     fn test_new_creates_transport() {
-        let transport = HttpMcpTransport::new("http://localhost:8080", "test");
+        let transport = HttpMcpTransport::new("http://localhost:8080", "test").unwrap();
         assert_eq!(transport.server_url(), "http://localhost:8080");
         assert!(transport.session_manager().is_none());
         assert!(transport.custom_headers.is_empty());
@@ -420,7 +468,7 @@ mod tests {
     fn new_falls_back_on_invalid_server_name() {
         // Slashes are forbidden by the `McpServerName` allowlist, so the
         // fallback path must engage.
-        let transport = HttpMcpTransport::new("http://localhost:8080", "bad/name");
+        let transport = HttpMcpTransport::new("http://localhost:8080", "bad/name").unwrap();
         let name = McpServerName::new(transport.server_name.as_str())
             .expect("stored server_name must be a valid McpServerName (allowlist or fallback)");
         assert_eq!(
@@ -434,13 +482,13 @@ mod tests {
     /// construction intact (no accidental fold or truncation).
     #[test]
     fn new_preserves_valid_server_name() {
-        let transport = HttpMcpTransport::new("http://localhost:8080", "good_name123");
+        let transport = HttpMcpTransport::new("http://localhost:8080", "good_name123").unwrap();
         assert_eq!(transport.server_name.as_str(), "good_name123");
     }
 
     #[test]
     fn test_supports_http_features() {
-        let http_transport = HttpMcpTransport::new("http://localhost:8080", "test");
+        let http_transport = HttpMcpTransport::new("http://localhost:8080", "test").unwrap();
         assert!(http_transport.supports_http_features());
     }
 
@@ -448,6 +496,7 @@ mod tests {
     fn test_with_session_manager() {
         let session_manager = Arc::new(McpSessionManager::new());
         let transport = HttpMcpTransport::new("http://localhost:8080", "test")
+            .unwrap()
             .with_session_manager(session_manager.clone(), "user-a");
         assert!(transport.session_manager().is_some());
     }
@@ -457,7 +506,7 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("X-Custom".to_string(), "value".to_string());
         let transport =
-            HttpMcpTransport::new("http://localhost:8080", "test").with_custom_headers(headers);
+            HttpMcpTransport::new("http://localhost:8080", "test").unwrap().with_custom_headers(headers);
         assert_eq!(transport.custom_headers.get("X-Custom").unwrap(), "value");
     }
 
@@ -507,7 +556,7 @@ mod tests {
             ("X-Api-Key".to_string(), "secret-key".to_string()),
             ("X-Org-Id".to_string(), "org-123".to_string()),
         ]);
-        let transport = HttpMcpTransport::new(&url, "echo-test").with_custom_headers(custom);
+        let transport = HttpMcpTransport::new(&url, "echo_test").unwrap().with_custom_headers(custom);
 
         let request = McpRequest {
             jsonrpc: "2.0".to_string(),
@@ -534,7 +583,7 @@ mod tests {
             "authorization".to_string(),
             "Bearer custom-token".to_string(),
         )]);
-        let transport = HttpMcpTransport::new(&url, "echo-test").with_custom_headers(custom);
+        let transport = HttpMcpTransport::new(&url, "echo_test").unwrap().with_custom_headers(custom);
 
         // Per-request header should override the custom header
         let per_request = HashMap::from([(
@@ -576,7 +625,7 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        let transport = HttpMcpTransport::new(&url, "test-202");
+        let transport = HttpMcpTransport::new(&url, "test_202").unwrap();
         let request = McpRequest::initialized_notification();
         let response = transport.send(&request, &HashMap::new()).await.unwrap();
         assert!(response.result.is_none());
@@ -591,7 +640,7 @@ mod tests {
             "authorization".to_string(),
             "Bearer custom-token".to_string(),
         )]);
-        let transport = HttpMcpTransport::new(&url, "echo-test").with_custom_headers(custom);
+        let transport = HttpMcpTransport::new(&url, "echo_test").unwrap().with_custom_headers(custom);
 
         let per_request = HashMap::new(); // no per-request auth
         let request = McpRequest {
@@ -644,7 +693,7 @@ mod tests {
     #[tokio::test]
     async fn test_accepted_notification_returns_empty_response() {
         let (url, _handle) = spawn_accepted_server().await;
-        let transport = HttpMcpTransport::new(&url, "accepted-test");
+        let transport = HttpMcpTransport::new(&url, "accepted_test").unwrap();
         let request = notification_request("notifications/initialized");
 
         let response = transport
@@ -655,5 +704,50 @@ mod tests {
         assert_eq!(response.id, request.id);
         assert!(response.result.is_none());
         assert!(response.error.is_none());
+    }
+
+    // -- SSRF prevention tests -----------------------------------------------
+
+    #[test]
+    fn new_rejects_private_ip_10_range() {
+        let result = HttpMcpTransport::new("http://10.0.0.1:8080", "test");
+        let err = result.err().expect("should reject private IP");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("SSRF blocked"),
+            "error should mention SSRF: {msg}"
+        );
+    }
+
+    #[test]
+    fn new_rejects_ipv4_mapped_ipv6_loopback() {
+        let result = HttpMcpTransport::new("http://[::ffff:127.0.0.1]:8080", "test");
+        let err = result.err().expect("should reject IPv4-mapped IPv6 loopback");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("SSRF blocked"),
+            "error should mention SSRF: {msg}"
+        );
+    }
+
+    #[test]
+    fn new_rejects_metadata_endpoint() {
+        let result = HttpMcpTransport::new("http://169.254.169.254/latest/meta-data/", "test");
+        let err = result.err().expect("should reject cloud metadata endpoint");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("SSRF blocked"),
+            "error should mention SSRF: {msg}"
+        );
+    }
+
+    #[test]
+    fn new_allows_localhost() {
+        let result = HttpMcpTransport::new("http://localhost:9999", "test");
+        assert!(
+            result.is_ok(),
+            "localhost MCP servers must be allowed: {:?}",
+            result.err()
+        );
     }
 }

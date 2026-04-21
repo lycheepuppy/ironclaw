@@ -123,7 +123,7 @@ pub async fn create_client_from_config(
                         Arc::clone(session_manager),
                         Arc::clone(secrets),
                         user_id,
-                    ));
+                    )?);
                 }
             }
 
@@ -132,7 +132,7 @@ pub async fn create_client_from_config(
             // the client (via `with_session_manager`) is not enough — the
             // transport must know about it to read/write the header.
             let transport = Arc::new(
-                HttpMcpTransport::new(server.url.clone(), validated_name.as_str())
+                HttpMcpTransport::new(server.url.clone(), validated_name.as_str())?
                     .with_session_manager(Arc::clone(session_manager), user_id),
             );
             Ok(McpClient::new_with_transport(
