@@ -43,7 +43,7 @@ impl HttpMcpTransport {
     /// `McpServerName::new`; if validation fails we fall back to the
     /// canonical `"unknown"` value rather than bypassing the allowlist
     /// via `from_trusted`.
-    pub fn new(
+    pub async fn new(
         server_url: impl Into<String>,
         server_name: impl Into<String>,
     ) -> Result<Self, ToolError> {
@@ -57,27 +57,38 @@ impl HttpMcpTransport {
                  falling back to canonical 'unknown'"
             );
             McpServerName::new("unknown")
-                .expect("'unknown' is a valid McpServerName (alnum allowlist)") // safety: hardcoded literal satisfies alnum-only validation; infallible
+                .expect("'unknown' is a valid McpServerName (alnum allowlist)")
         });
 
-        if !crate::tools::mcp::config::is_localhost_url(&server_url) {
-            crate::tools::wasm::reject_private_ip(&server_url).map_err(|e| {
-                ToolError::ExternalService(format!(
-                    "[{}] SSRF blocked for MCP server URL: {}",
-                    server_name, e
-                ))
-            })?;
-        }
-
-        let http_client = crate::tools::wasm::ssrf_safe_client_builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| {
-                ToolError::ExternalService(format!(
-                    "[{}] Failed to create HTTP client: {}",
-                    server_name, e
-                ))
-            })?;
+        let http_client = if crate::tools::mcp::config::is_localhost_url(&server_url) {
+            crate::tools::wasm::ssrf_safe_client_builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .map_err(|e| {
+                    ToolError::ExternalService(format!(
+                        "[{}] Failed to create HTTP client: {}",
+                        server_name, e
+                    ))
+                })?
+        } else {
+            let target = crate::tools::wasm::validate_and_resolve_http_target(&server_url)
+                .await
+                .map_err(|e| {
+                    ToolError::ExternalService(format!(
+                        "[{}] SSRF blocked for MCP server URL: {}",
+                        server_name, e
+                    ))
+                })?;
+            crate::tools::wasm::ssrf_safe_client_builder_for_target(&target)
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .map_err(|e| {
+                    ToolError::ExternalService(format!(
+                        "[{}] Failed to create HTTP client: {}",
+                        server_name, e
+                    ))
+                })?
+        };
 
         Ok(Self {
             server_url,
@@ -450,9 +461,11 @@ mod tests {
         assert_eq!(sanitize_error_body(""), "");
     }
 
-    #[test]
-    fn test_new_creates_transport() {
-        let transport = HttpMcpTransport::new("http://localhost:8080", "test").unwrap();
+    #[tokio::test]
+    async fn test_new_creates_transport() {
+        let transport = HttpMcpTransport::new("http://localhost:8080", "test")
+            .await
+            .unwrap();
         assert_eq!(transport.server_url(), "http://localhost:8080");
         assert!(transport.session_manager().is_none());
         assert!(transport.custom_headers.is_empty());
@@ -464,11 +477,13 @@ mod tests {
     /// After the fix, invalid inputs fall back to the canonical
     /// `"unknown"` value — matching the pattern in `McpClient::new` and
     /// `McpClient::new_with_name`.
-    #[test]
-    fn new_falls_back_on_invalid_server_name() {
+    #[tokio::test]
+    async fn new_falls_back_on_invalid_server_name() {
         // Slashes are forbidden by the `McpServerName` allowlist, so the
         // fallback path must engage.
-        let transport = HttpMcpTransport::new("http://localhost:8080", "bad/name").unwrap();
+        let transport = HttpMcpTransport::new("http://localhost:8080", "bad/name")
+            .await
+            .unwrap();
         let name = McpServerName::new(transport.server_name.as_str())
             .expect("stored server_name must be a valid McpServerName (allowlist or fallback)");
         assert_eq!(
@@ -480,32 +495,38 @@ mod tests {
 
     /// Complementary positive case: a valid allowlist name survives
     /// construction intact (no accidental fold or truncation).
-    #[test]
-    fn new_preserves_valid_server_name() {
-        let transport = HttpMcpTransport::new("http://localhost:8080", "good_name123").unwrap();
+    #[tokio::test]
+    async fn new_preserves_valid_server_name() {
+        let transport = HttpMcpTransport::new("http://localhost:8080", "good_name123")
+            .await
+            .unwrap();
         assert_eq!(transport.server_name.as_str(), "good_name123");
     }
 
-    #[test]
-    fn test_supports_http_features() {
-        let http_transport = HttpMcpTransport::new("http://localhost:8080", "test").unwrap();
+    #[tokio::test]
+    async fn test_supports_http_features() {
+        let http_transport = HttpMcpTransport::new("http://localhost:8080", "test")
+            .await
+            .unwrap();
         assert!(http_transport.supports_http_features());
     }
 
-    #[test]
-    fn test_with_session_manager() {
+    #[tokio::test]
+    async fn test_with_session_manager() {
         let session_manager = Arc::new(McpSessionManager::new());
         let transport = HttpMcpTransport::new("http://localhost:8080", "test")
+            .await
             .unwrap()
             .with_session_manager(session_manager.clone(), "user-a");
         assert!(transport.session_manager().is_some());
     }
 
-    #[test]
-    fn test_with_custom_headers() {
+    #[tokio::test]
+    async fn test_with_custom_headers() {
         let mut headers = HashMap::new();
         headers.insert("X-Custom".to_string(), "value".to_string());
         let transport = HttpMcpTransport::new("http://localhost:8080", "test")
+            .await
             .unwrap()
             .with_custom_headers(headers);
         assert_eq!(transport.custom_headers.get("X-Custom").unwrap(), "value");
@@ -558,6 +579,7 @@ mod tests {
             ("X-Org-Id".to_string(), "org-123".to_string()),
         ]);
         let transport = HttpMcpTransport::new(&url, "echo_test")
+            .await
             .unwrap()
             .with_custom_headers(custom);
 
@@ -587,6 +609,7 @@ mod tests {
             "Bearer custom-token".to_string(),
         )]);
         let transport = HttpMcpTransport::new(&url, "echo_test")
+            .await
             .unwrap()
             .with_custom_headers(custom);
 
@@ -630,7 +653,7 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        let transport = HttpMcpTransport::new(&url, "test_202").unwrap();
+        let transport = HttpMcpTransport::new(&url, "test_202").await.unwrap();
         let request = McpRequest::initialized_notification();
         let response = transport.send(&request, &HashMap::new()).await.unwrap();
         assert!(response.result.is_none());
@@ -646,6 +669,7 @@ mod tests {
             "Bearer custom-token".to_string(),
         )]);
         let transport = HttpMcpTransport::new(&url, "echo_test")
+            .await
             .unwrap()
             .with_custom_headers(custom);
 
@@ -700,7 +724,7 @@ mod tests {
     #[tokio::test]
     async fn test_accepted_notification_returns_empty_response() {
         let (url, _handle) = spawn_accepted_server().await;
-        let transport = HttpMcpTransport::new(&url, "accepted_test").unwrap();
+        let transport = HttpMcpTransport::new(&url, "accepted_test").await.unwrap();
         let request = notification_request("notifications/initialized");
 
         let response = transport
@@ -715,9 +739,9 @@ mod tests {
 
     // -- SSRF prevention tests -----------------------------------------------
 
-    #[test]
-    fn new_rejects_private_ip_10_range() {
-        let result = HttpMcpTransport::new("http://10.0.0.1:8080", "test");
+    #[tokio::test]
+    async fn new_rejects_private_ip_10_range() {
+        let result = HttpMcpTransport::new("http://10.0.0.1:8080", "test").await;
         let err = result.err().expect("should reject private IP");
         let msg = err.to_string();
         assert!(
@@ -726,10 +750,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn new_rejects_ipv4_mapped_ipv6_loopback() {
-        let result = HttpMcpTransport::new("http://[::ffff:127.0.0.1]:8080", "test");
-        let err = result.err().expect("should reject IPv4-mapped IPv6 loopback");
+    #[tokio::test]
+    async fn new_rejects_ipv4_mapped_ipv6_loopback() {
+        let result = HttpMcpTransport::new("http://[::ffff:127.0.0.1]:8080", "test").await;
+        let err = result
+            .err()
+            .expect("should reject IPv4-mapped IPv6 loopback");
         let msg = err.to_string();
         assert!(
             msg.contains("SSRF blocked"),
@@ -737,9 +763,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn new_rejects_metadata_endpoint() {
-        let result = HttpMcpTransport::new("http://169.254.169.254/latest/meta-data/", "test");
+    #[tokio::test]
+    async fn new_rejects_metadata_endpoint() {
+        let result =
+            HttpMcpTransport::new("http://169.254.169.254/latest/meta-data/", "test").await;
         let err = result.err().expect("should reject cloud metadata endpoint");
         let msg = err.to_string();
         assert!(
@@ -748,9 +775,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn new_allows_localhost() {
-        let result = HttpMcpTransport::new("http://localhost:9999", "test");
+    #[tokio::test]
+    async fn new_allows_localhost() {
+        let result = HttpMcpTransport::new("http://localhost:9999", "test").await;
         assert!(
             result.is_ok(),
             "localhost MCP servers must be allowed: {:?}",

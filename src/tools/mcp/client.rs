@@ -102,8 +102,9 @@ pub struct McpClient {
 impl McpClient {
     /// Create a new simple MCP client (no authentication).
     ///
-    /// Validates the server URL against SSRF (blocks private IPs except localhost).
-    pub fn new(server_url: impl Into<String>) -> Result<Self, ToolError> {
+    /// Validates the server URL against SSRF (blocks private IPs except localhost)
+    /// with DNS pinning to prevent TOCTOU rebinding attacks.
+    pub async fn new(server_url: impl Into<String>) -> Result<Self, ToolError> {
         let url: String = server_url.into();
         let mut name_str = extract_server_name(&url);
         if name_str.contains('-') {
@@ -119,7 +120,7 @@ impl McpClient {
             McpServerName::new("unknown")
                 .expect("'unknown' is a valid McpServerName (alnum allowlist)") // safety: hardcoded literal satisfies alnum-only validation; infallible
         });
-        let transport = Arc::new(HttpMcpTransport::new(url.clone(), name.as_str())?);
+        let transport = Arc::new(HttpMcpTransport::new(url.clone(), name.as_str()).await?);
 
         Ok(Self {
             transport,
@@ -140,8 +141,9 @@ impl McpClient {
 
     /// Create a new simple MCP client with a specific name.
     ///
-    /// Validates the server URL against SSRF (blocks private IPs except localhost).
-    pub fn new_with_name(
+    /// Validates the server URL against SSRF (blocks private IPs except localhost)
+    /// with DNS pinning to prevent TOCTOU rebinding attacks.
+    pub async fn new_with_name(
         server_name: impl Into<String>,
         server_url: impl Into<String>,
     ) -> Result<Self, ToolError> {
@@ -157,7 +159,7 @@ impl McpClient {
                 .expect("'unknown' is a valid McpServerName (alnum allowlist)") // safety: hardcoded literal satisfies alnum-only validation; infallible
         });
         let url: String = server_url.into();
-        let transport = Arc::new(HttpMcpTransport::new(url.clone(), name.as_str())?);
+        let transport = Arc::new(HttpMcpTransport::new(url.clone(), name.as_str()).await?);
 
         Ok(Self {
             transport,
@@ -311,8 +313,9 @@ impl McpClient {
 
     /// Create a new authenticated MCP client.
     ///
-    /// Validates the server URL against SSRF (blocks private IPs except localhost).
-    pub fn new_authenticated(
+    /// Validates the server URL against SSRF (blocks private IPs except localhost)
+    /// with DNS pinning to prevent TOCTOU rebinding attacks.
+    pub async fn new_authenticated(
         config: McpServerConfig,
         session_manager: Arc<McpSessionManager>,
         secrets: Arc<dyn SecretsStore + Send + Sync>,
@@ -326,11 +329,12 @@ impl McpClient {
                  falling back to canonical 'unknown'"
             );
             McpServerName::new("unknown")
-                .expect("'unknown' is a valid McpServerName (alnum allowlist)") // safety: hardcoded literal satisfies alnum-only validation; infallible
+                .expect("'unknown' is a valid McpServerName (alnum allowlist)")
         });
         let user_id_str: String = user_id.into();
         let transport = Arc::new(
-            HttpMcpTransport::new(config.url.clone(), validated_name.as_str())?
+            HttpMcpTransport::new(config.url.clone(), validated_name.as_str())
+                .await?
                 .with_session_manager(session_manager.clone(), &user_id_str),
         );
 
@@ -1440,7 +1444,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_transport_supports_http_features_accessor() {
-        let http_transport = HttpMcpTransport::new("http://localhost:8080", "test");
+        let http_transport = HttpMcpTransport::new("http://localhost:8080", "test")
+            .await
+            .unwrap();
         assert!(http_transport.supports_http_features());
         let mock_non_http = MockTransport::new(false, vec![]);
         assert!(!mock_non_http.supports_http_features());
@@ -1679,9 +1685,9 @@ mod tests {
             Arc::new(crate::secrets::InMemorySecretsStore::new(crypto));
 
         let config = McpServerConfig::new("bad name", "https://93.184.215.14");
-        let client =
-            McpClient::new_authenticated(config, session_manager, secrets, "test-user")
-                .expect("factory should succeed for public IP");
+        let client = McpClient::new_authenticated(config, session_manager, secrets, "test-user")
+            .await
+            .expect("factory should succeed for public IP");
         assert_eq!(
             client.server_name(),
             "unknown",
@@ -1699,9 +1705,9 @@ mod tests {
             Arc::new(crate::secrets::InMemorySecretsStore::new(crypto));
 
         let config = McpServerConfig::new("good_name123", "https://93.184.215.14");
-        let client =
-            McpClient::new_authenticated(config, session_manager, secrets, "test-user")
-                .expect("factory should succeed for public IP");
+        let client = McpClient::new_authenticated(config, session_manager, secrets, "test-user")
+            .await
+            .expect("factory should succeed for public IP");
         assert_eq!(client.server_name(), "good_name123");
     }
 
@@ -2153,9 +2159,9 @@ mod tests {
         let secrets: Arc<dyn crate::secrets::SecretsStore + Send + Sync> =
             Arc::new(EmptyTokenStore);
 
-        let client =
-            McpClient::new_authenticated(config, session_manager, secrets, "test-user")
-                .expect("factory should succeed for public IP");
+        let client = McpClient::new_authenticated(config, session_manager, secrets, "test-user")
+            .await
+            .expect("factory should succeed for public IP");
 
         let headers = client.build_request_headers().await.unwrap(); // safety: test
         assert!(
@@ -2220,9 +2226,9 @@ mod tests {
         let secrets: Arc<dyn crate::secrets::SecretsStore + Send + Sync> =
             Arc::new(PaddedTokenStore);
 
-        let client =
-            McpClient::new_authenticated(config, session_manager, secrets, "test-user")
-                .expect("factory should succeed for public IP");
+        let client = McpClient::new_authenticated(config, session_manager, secrets, "test-user")
+            .await
+            .expect("factory should succeed for public IP");
 
         let headers = client.build_request_headers().await.unwrap(); // safety: test
         assert_eq!(

@@ -8283,11 +8283,11 @@ mod tests {
             None,
         );
 
-        let client_a = Arc::new(crate::tools::mcp::McpClient::new_with_name(
+        let client_a = Arc::new(crate::tools::mcp::McpClient::new_with_name_unchecked(
             "notion",
             "http://localhost:3001",
         ));
-        let client_b = Arc::new(crate::tools::mcp::McpClient::new_with_name(
+        let client_b = Arc::new(crate::tools::mcp::McpClient::new_with_name_unchecked(
             "notion",
             "http://localhost:3002",
         ));
